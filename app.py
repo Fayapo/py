@@ -1,53 +1,62 @@
 import streamlit as st
-from supabase import create_client, ClientOptions
+import requests
 import pandas as pd
 from datetime import datetime
 
 st.set_page_config(page_title="Sistema de Estoque e Vendas", layout="wide", page_icon="💎")
 
-# Connect to database
-def init_connection():
-    try:
-        url = st.secrets.get("SUPABASE_URL", "")
-        key = st.secrets.get("SUPABASE_KEY", "")
+# --- CONEXÃO REST PURA (À prova de travamentos/hangs no Streamlit) ---
+def init_headers():
+    url = st.secrets.get("SUPABASE_URL", "")
+    key = st.secrets.get("SUPABASE_KEY", "")
+    
+    if "SUA_" in url or "SUA_" in key or not url.startswith("http"):
+        return None, None
         
-        if not url or not key:
-            return None
-        
-        # Evita travar (hang) se as credenciais de exemplo forem deixadas
-        if "SUA_" in url or "SUA_" in key or not url.startswith("http"):
-            return None
-            
-        opts = ClientOptions(postgrest_client_timeout=10, storage_client_timeout=10)
-        return create_client(url, key, options=opts)
-    except Exception as e:
-        return None
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
+    }
+    # O REST do Supabase roda na rota /rest/v1/ do seu URL base.
+    base_url = f"{url}/rest/v1"
+    
+    return base_url, headers
 
-try:
-    supabase = init_connection()
-except Exception:
-    supabase = None
+url_base, headers = init_headers()
 
-if supabase is None:
+if not url_base or not headers:
     st.error("⚠️ Banco de dados não configurado ou credenciais inválidas. Verifique o seu `.streamlit/secrets.toml` (local) ou o painel 'Secrets' (no Cloud). Atenção: A URL deve começar com https:// e a KEY não pode ser a de exemplo.")
     st.stop()
 
-# Helper Functions
+# Helper Functions via Requests
 def get_produtos():
     try:
-        res = supabase.table("produtos").select("*").execute()
-        return res.data
+        response = requests.get(f"{url_base}/produtos?select=*", headers=headers, timeout=5)
+        response.raise_for_status()
+        return response.json()
     except Exception as e:
-        st.error(f"Erro ao buscar produtos: {e}")
+        st.error(f"Erro de conexão (Produtos): {e}")
         return []
 
 def get_vendas():
     try:
-        res = supabase.table("vendas").select("*").execute()
-        return res.data
+        response = requests.get(f"{url_base}/vendas?select=*", headers=headers, timeout=5)
+        response.raise_for_status()
+        return response.json()
     except Exception as e:
-        st.error(f"Erro ao buscar vendas: {e}")
+        st.error(f"Erro de conexão (Vendas): {e}")
         return []
+
+def update_produto(codigo, dados):
+    requests.patch(f"{url_base}/produtos?codigo=eq.{codigo}", headers=headers, json=dados, timeout=5)
+
+def insert_produto(dados):
+    requests.post(f"{url_base}/produtos", headers=headers, json=dados, timeout=5)
+
+def insert_venda(dados):
+    requests.post(f"{url_base}/vendas", headers=headers, json=dados, timeout=5)
 
 CATEGORIAS = ["Brinco", "Anel", "Pulseira", "Choker", "Tornozeleira"]
 
@@ -136,13 +145,13 @@ elif page == "📦 Produtos e Custos":
                     st.write(f"**Nova Margem de Lucro Projetada:** {margem:.1f}%")
                     
                     if st.form_submit_button("Salvar Edição"):
-                        supabase.table("produtos").update({
+                        update_produto(cod_edit, {
                             "categoria": cat_edit,
                             "estoque": estoque_edit,
                             "custo_fabricacao": cf_edit,
                             "custo_banho": cb_edit,
                             "valor_venda": vv_edit
-                        }).eq("codigo", cod_edit).execute()
+                        })
                         st.success("Valores atualizados com sucesso!")
                         st.rerun()
         else:
@@ -166,18 +175,18 @@ elif page == "📦 Produtos e Custos":
                 if not codigo:
                     st.error("Insira um código identificador válido do produto.")
                 else:
-                    existe = supabase.table("produtos").select("codigo").eq("codigo", codigo).execute()
-                    if existe.data:
+                    existe = requests.get(f"{url_base}/produtos?codigo=eq.{codigo}&select=codigo", headers=headers).json()
+                    if existe:
                         st.error("Um produto com este mesmo código já foi cadastrado no sistema.")
                     else:
-                        supabase.table("produtos").insert({
+                        insert_produto({
                             "codigo": codigo,
                             "categoria": categoria,
                             "custo_fabricacao": custo_fab,
                             "custo_banho": custo_banho,
                             "valor_venda": valor_venda,
                             "estoque": estoque
-                        }).execute()
+                        })
                         st.success("Produto adicionado com sucesso ao catálogo!")
                         st.rerun()
 
@@ -234,17 +243,17 @@ elif page == "🛒 Registro de Vendas":
                     
                     novo_estoque = int(prod['estoque']) - qtd_venda
                     # Dar baixa no estoque da tabela de produtos (sincronizado automaticamente)
-                    supabase.table("produtos").update({"estoque": novo_estoque}).eq("codigo", cod_venda).execute()
+                    update_produto(cod_venda, {"estoque": novo_estoque})
                     
                     # Registrar log/transação de Venda
-                    supabase.table("vendas").insert({
+                    insert_venda({
                         "codigo_produto": cod_venda,
                         "quantidade": int(qtd_venda),
                         "custo_fabricacao_unitario": cf,
                         "custo_banho_unitario": cb,
                         "valor_venda_unitario": vv - (desconto/qtd_venda if qtd_venda > 0 else 0), # Ajusta métricas se tiver desconto
                         "lucro_real_total": lucro_real
-                    }).execute()
+                    })
                     
                     st.success(f"Venda registrada com sucesso! Seu estoque foi atualizado para {novo_estoque} peças. O seu Lucro Real contabilizado foi de R$ {lucro_real:.2f}.")
                     st.rerun()
