@@ -8,14 +8,28 @@ st.set_page_config(page_title="Sistema de Estoque e Vendas", layout="wide", page
 # Connect to database
 @st.cache_resource
 def init_connection():
-    if "SUPABASE_URL" not in st.secrets or "SUPABASE_KEY" not in st.secrets:
+    try:
+        url = st.secrets.get("SUPABASE_URL", "")
+        key = st.secrets.get("SUPABASE_KEY", "")
+        
+        if not url or not key:
+            return None
+        
+        # Evita travar (hang) se as credenciais de exemplo forem deixadas
+        if "SUA_" in url or "SUA_" in key or not url.startswith("http"):
+            return None
+            
+        return create_client(url, key)
+    except Exception as e:
         return None
-    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
-supabase = init_connection()
+try:
+    supabase = init_connection()
+except Exception:
+    supabase = None
 
 if supabase is None:
-    st.error("⚠️ Banco de dados não configurado. Adicione o arquivo `.streamlit/secrets.toml` com suas credenciais do Supabase. Veja as instruções em INSTRUCOES.md.")
+    st.error("⚠️ Banco de dados não configurado ou credenciais inválidas. Verifique o seu `.streamlit/secrets.toml` (local) ou o painel 'Secrets' (no Cloud). Atenção: A URL deve começar com https:// e a KEY não pode ser a de exemplo.")
     st.stop()
 
 # Helper Functions
