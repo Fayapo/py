@@ -35,9 +35,9 @@ def init_headers():
     
     return base_url, headers
 
-url_base, headers = init_headers()
+url_base_global, headers_global = init_headers()
 
-if not url_base or not headers:
+if not url_base_global or not headers_global:
     st.error("⚠️ Banco de dados não configurado ou credenciais inválidas. Verifique o seu `.streamlit/secrets.toml` (local) ou o painel 'Secrets' (no Cloud). Atenção: A URL deve começar com https:// e a KEY não pode ser a de exemplo.")
     st.stop()
 
@@ -51,6 +51,7 @@ def get_image_base64(uploaded_file):
 
 # Helper Functions via Requests
 def get_produtos():
+    url_base, headers = init_headers()
     try:
         response = requests.get(f"{url_base}/produtos?select=*", headers=headers, timeout=5)
         response.raise_for_status()
@@ -60,6 +61,7 @@ def get_produtos():
         return []
 
 def get_vendas():
+    url_base, headers = init_headers()
     try:
         response = requests.get(f"{url_base}/vendas?select=*", headers=headers, timeout=5)
         response.raise_for_status()
@@ -69,6 +71,7 @@ def get_vendas():
         return []
 
 def update_produto(codigo, dados):
+    url_base, headers = init_headers()
     try:
         response = requests.patch(f"{url_base}/produtos?codigo=eq.{codigo}", headers=headers, json=dados, timeout=5)
         response.raise_for_status()
@@ -81,6 +84,7 @@ def update_produto(codigo, dados):
         return False
 
 def insert_produto(dados):
+    url_base, headers = init_headers()
     try:
         response = requests.post(f"{url_base}/produtos", headers=headers, json=dados, timeout=5)
         response.raise_for_status()
@@ -93,6 +97,7 @@ def insert_produto(dados):
         return False
 
 def insert_venda(dados):
+    url_base, headers = init_headers()
     try:
         response = requests.post(f"{url_base}/vendas", headers=headers, json=dados, timeout=5)
         response.raise_for_status()
@@ -105,6 +110,7 @@ def insert_venda(dados):
         return False
 
 def update_venda(id_venda, dados):
+    url_base, headers = init_headers()
     try:
         response = requests.patch(f"{url_base}/vendas?id=eq.{id_venda}", headers=headers, json=dados, timeout=5)
         response.raise_for_status()
@@ -258,6 +264,7 @@ elif page == "📦 Produtos e Custos":
                 if not codigo:
                     st.error("Insira um código identificador válido do produto.")
                 else:
+                    url_base, headers = init_headers()
                     existe = requests.get(f"{url_base}/produtos?codigo=eq.{codigo}&select=codigo", headers=headers).json()
                     if existe:
                         st.error("Um produto com este mesmo código já foi cadastrado no sistema.")
