@@ -104,10 +104,22 @@ def insert_venda(dados):
         st.error(f"Erro de conexão (Venda): {e}")
         return False
 
+def update_venda(id_venda, dados):
+    try:
+        response = requests.patch(f"{url_base}/vendas?id=eq.{id_venda}", headers=headers, json=dados, timeout=5)
+        response.raise_for_status()
+        return True
+    except requests.exceptions.HTTPError as err:
+        st.error(f"Erro ao atualizar: {response.text}")
+        return False
+    except Exception as e:
+        st.error(f"Erro de conexão ao atualizar: {e}")
+        return False
+
 CATEGORIAS = ["Brinco", "Anel", "Pulseira", "Choker", "Tornozeleira"]
 
 st.sidebar.title("🌹 Rosemie - Painel")
-page = st.sidebar.radio("Navegação", ["📊 Dashboard Financeiro", "📦 Produtos e Custos", "🛒 Registro de Vendas"])
+page = st.sidebar.radio("Navegação", ["📊 Dashboard Financeiro", "📦 Produtos e Custos", "🛒 Registro de Vendas", "👥 Área de Clientes"])
 
 if page == "📊 Dashboard Financeiro":
     st.title("Dashboard Financeiro")
@@ -313,6 +325,13 @@ elif page == "🛒 Registro de Vendas":
                 
                 desconto = st.number_input("Desconto Concedido nesta Operação (R$)", min_value=0.0, step=0.1, value=0.0, help="Valor bruto de desconto que diminui a receita desta venda e o lucro final.")
                 
+                st.divider()
+                st.write("Dados do Cliente e Pagamento")
+                cliente_nome = st.text_input("Nome do Cliente", help="Nome do cliente para registrar histórico e garantia.")
+                data_compra = st.date_input("Data da Compra", value=datetime.today())
+                tipo_pagamento = st.selectbox("Forma de Pagamento", ["PIX", "Cartão de Crédito", "Cartão de Débito", "Dinheiro"])
+                status_pagamento = st.selectbox("Status do Pagamento", ["Pago", "Pendente"])
+                
                 if st.form_submit_button("Confirmar Venda e Dar Baixa de Estoque"):
                     custo_total_operacao = (cf + cb) * qtd_venda
                     receita_venda = (vv * qtd_venda) - desconto
@@ -329,7 +348,11 @@ elif page == "🛒 Registro de Vendas":
                         "custo_fabricacao_unitario": cf,
                         "custo_banho_unitario": cb,
                         "valor_venda_unitario": vv - (desconto/qtd_venda if qtd_venda > 0 else 0), # Ajusta métricas se tiver desconto
-                        "lucro_real_total": lucro_real
+                        "lucro_real_total": lucro_real,
+                        "cliente_nome": cliente_nome,
+                        "data_compra": data_compra.strftime("%Y-%m-%d"),
+                        "tipo_pagamento": tipo_pagamento,
+                        "status_pagamento": status_pagamento
                     })
                     
                     st.success(f"Venda registrada com sucesso! Seu estoque foi atualizado para {novo_estoque} peças. O seu Lucro Real contabilizado foi de R$ {lucro_real:.2f}.")
@@ -354,3 +377,98 @@ elif page == "🛒 Registro de Vendas":
                 'lucro_real_total': 'Lucro Real Líquido (R$)'
             })
             st.dataframe(df_v_display.style.format({'Lucro Real Líquido (R$)': 'R$ {:.2f}'}), use_container_width=True)
+
+elif page == "👥 Área de Clientes":
+    st.title("👥 Área de Clientes e Garantia")
+    
+    vendas = get_vendas()
+    if not vendas:
+        st.info("Nenhuma venda registrada ainda.")
+    else:
+        df_vendas = pd.DataFrame(vendas)
+        
+        if 'cliente_nome' not in df_vendas.columns:
+            st.warning("Ainda não há clientes com nomes registrados nas vendas. Registre uma nova venda para criar a base ou atualize as colunas no banco de dados.")
+        else:
+            # Filtra vendas que têm nome de cliente válido
+            df_clientes = df_vendas[df_vendas['cliente_nome'].notna() & (df_vendas['cliente_nome'] != '')]
+            
+            if df_clientes.empty:
+                st.info("Nenhum cliente registrado por nome nas vendas.")
+            else:
+                clientes_unicos = df_clientes['cliente_nome'].unique()
+                cliente_selecionado = st.selectbox("Selecione o Cliente para Buscar", sorted(clientes_unicos))
+                
+                vendas_cliente = df_clientes[df_clientes['cliente_nome'] == cliente_selecionado].copy()
+                
+                # Calcular métricas (receita gerada pelas compras do cliente)
+                vendas_cliente['valor_venda_unitario'] = vendas_cliente['valor_venda_unitario'].astype(float)
+                vendas_cliente['quantidade'] = vendas_cliente['quantidade'].astype(int)
+                
+                total_gasto = (vendas_cliente['valor_venda_unitario'] * vendas_cliente['quantidade']).sum()
+                
+                col1, col2 = st.columns(2)
+                col1.metric("Total Gasto pelo Cliente", f"R$ {total_gasto:,.2f}")
+                col2.metric("Quantidade de Peças Compradas", f"{vendas_cliente['quantidade'].sum()} peça(s)")
+                
+                st.divider()
+                st.subheader("Histórico de Compras e Garantia")
+                st.write("Verifique abaixo as peças adquiridas, data da compra (garantia de 6 meses) e o status do pagamento.")
+                
+                if 'data_compra' in vendas_cliente.columns:
+                    vendas_cliente['data_ordem'] = vendas_cliente['data_compra'].fillna(vendas_cliente['created_at'])
+                    vendas_cliente = vendas_cliente.sort_values(by="data_ordem", ascending=False)
+
+                for _, venda in vendas_cliente.iterrows():
+                    venda_id = venda.get('id', None)
+                    cod_prod = venda.get('codigo_produto', 'Produto Desconhecido')
+                    
+                    dt_compra = venda.get('data_compra')
+                    if pd.isna(dt_compra) or not dt_compra:
+                        dt_compra = str(venda.get('created_at', 'Sem Data'))[:10]
+                    else:
+                        dt_compra = str(dt_compra)[:10]
+                        
+                    qtd = int(venda.get('quantidade', 0))
+                    vv_unit = float(venda.get('valor_venda_unitario', 0))
+                    
+                    tipo_pag = venda.get('tipo_pagamento')
+                    if pd.isna(tipo_pag) or not tipo_pag: tipo_pag = "Não Informado"
+                        
+                    status_pag = venda.get('status_pagamento')
+                    if pd.isna(status_pag) or not status_pag: status_pag = "Não Informado"
+                    
+                    valor_total = vv_unit * qtd
+                    
+                    garantia_icone = "✅"
+                    try:
+                        dt_obj = datetime.strptime(dt_compra, "%Y-%m-%d")
+                        dias_passados = (datetime.today() - dt_obj).days
+                        if dias_passados > 180: # 6 meses = ~180 dias
+                            garantia_icone = "❌ (Expirada)"
+                        else:
+                            garantia_icone = f"✅ (Válida - Falta(m) {180 - dias_passados} dia(s))"
+                    except:
+                        pass
+                    
+                    with st.expander(f"🛒 **{qtd}x {cod_prod}** | Compra: {dt_compra} | {tipo_pag} | Status: {status_pag}"):
+                        st.write(f"**Referência do Produto:** {cod_prod}")
+                        st.write(f"**Quantidade Adquirida:** {qtd}")
+                        st.write(f"**Valor Total da Operação:** R$ {valor_total:.2f}")
+                        st.write(f"**Data da Compra:** {dt_compra}")
+                        st.write(f"**Garantia (6 meses):** {garantia_icone}")
+                        st.write(f"**Modalidade de Pagamento:** {tipo_pag}")
+                        
+                        if status_pag == "Pendente":
+                            st.warning("O status atual é: **Pendente**")
+                            if venda_id:
+                                if st.button(f"💰 Marcar como Pago", key=f"pago_{venda_id}"):
+                                    if update_venda(venda_id, {"status_pagamento": "Pago"}):
+                                        st.success("Status atualizado com sucesso para Pago!")
+                                        st.rerun()
+                            else:
+                                st.error("Esta venda antiga não possui um ID para atualização direta.")
+                        elif status_pag == "Pago":
+                            st.success("O status atual é: **Pago**")
+                        else:
+                            st.info(f"O status atual é: **{status_pag}**")
