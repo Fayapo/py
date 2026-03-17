@@ -1,12 +1,11 @@
 import streamlit as st
-from supabase import create_client
+from supabase import create_client, ClientOptions
 import pandas as pd
 from datetime import datetime
 
 st.set_page_config(page_title="Sistema de Estoque e Vendas", layout="wide", page_icon="💎")
 
 # Connect to database
-@st.cache_resource
 def init_connection():
     try:
         url = st.secrets.get("SUPABASE_URL", "")
@@ -19,7 +18,8 @@ def init_connection():
         if "SUA_" in url or "SUA_" in key or not url.startswith("http"):
             return None
             
-        return create_client(url, key)
+        opts = ClientOptions(postgrest_client_timeout=10, storage_client_timeout=10)
+        return create_client(url, key, options=opts)
     except Exception as e:
         return None
 
@@ -34,12 +34,20 @@ if supabase is None:
 
 # Helper Functions
 def get_produtos():
-    res = supabase.table("produtos").select("*").execute()
-    return res.data
+    try:
+        res = supabase.table("produtos").select("*").execute()
+        return res.data
+    except Exception as e:
+        st.error(f"Erro ao buscar produtos: {e}")
+        return []
 
 def get_vendas():
-    res = supabase.table("vendas").select("*").execute()
-    return res.data
+    try:
+        res = supabase.table("vendas").select("*").execute()
+        return res.data
+    except Exception as e:
+        st.error(f"Erro ao buscar vendas: {e}")
+        return []
 
 CATEGORIAS = ["Brinco", "Anel", "Pulseira", "Choker", "Tornozeleira"]
 
