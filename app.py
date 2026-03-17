@@ -1,9 +1,20 @@
 import streamlit as st
 import requests
 import pandas as pd
+import base64
 from datetime import datetime
 
-st.set_page_config(page_title="Sistema de Estoque e Vendas", layout="wide", page_icon="💎")
+st.set_page_config(page_title="Rosemie - Gestão Joias", layout="wide", page_icon="🌹")
+
+# --- CUSTOM CSS (Rosemie Elegance) ---
+st.markdown("""
+    <style>
+    .main .block-container { padding-top: 2rem; }
+    h1, h2, h3 { color: #8C6A5D; font-family: 'Optima', 'Georgia', serif; font-weight: 500;}
+    .stButton>button { border-color: #D4B2A7; color: #8C6A5D; }
+    .stButton>button:hover { background-color: #F8F4F1; border-color: #8C6A5D; color: #5C433A;}
+    </style>
+""", unsafe_allow_html=True)
 
 # --- CONEXÃO REST PURA (À prova de travamentos/hangs no Streamlit) ---
 def init_headers():
@@ -29,6 +40,14 @@ url_base, headers = init_headers()
 if not url_base or not headers:
     st.error("⚠️ Banco de dados não configurado ou credenciais inválidas. Verifique o seu `.streamlit/secrets.toml` (local) ou o painel 'Secrets' (no Cloud). Atenção: A URL deve começar com https:// e a KEY não pode ser a de exemplo.")
     st.stop()
+
+def get_image_base64(uploaded_file):
+    if uploaded_file is not None:
+        file_bytes = uploaded_file.getvalue()
+        mime_type = uploaded_file.type
+        encoded = base64.b64encode(file_bytes).decode()
+        return f"data:{mime_type};base64,{encoded}"
+    return ""
 
 # Helper Functions via Requests
 def get_produtos():
@@ -87,7 +106,7 @@ def insert_venda(dados):
 
 CATEGORIAS = ["Brinco", "Anel", "Pulseira", "Choker", "Tornozeleira"]
 
-st.sidebar.title("💎 Gestão de Joias")
+st.sidebar.title("🌹 Rosemie - Painel")
 page = st.sidebar.radio("Navegação", ["📊 Dashboard Financeiro", "📦 Produtos e Custos", "🛒 Registro de Vendas"])
 
 if page == "📊 Dashboard Financeiro":
@@ -170,7 +189,9 @@ elif page == "📦 Produtos e Custos":
                     cat_edit = c1.selectbox("Categoria Obrigatória", CATEGORIAS, index=CATEGORIAS.index(p_edit['categoria']) if p_edit['categoria'] in CATEGORIAS else 0)
                     estoque_edit = c2.number_input("Estoque", value=int(p_edit['estoque']), step=1, min_value=0)
                     
-                    foto_edit = st.text_input("URL da Foto Original do Produto (opcional)", value=p_edit.get('foto_url', ''), help="Cole um link direto para a imagem do produto. (Ex: ImgBB, Google Drive, ou URL pura do navegador)")
+                    st.write("**Atualizar Imagem da Peça (Opcional)**")
+                    foto_upload_edit = st.file_uploader("Envie a Foto do seu computador ou celular", type=["png", "jpg", "jpeg", "webp"], key=f"up_{cod_edit}")
+                    foto_edit = st.text_input("Ou cole a URL direta da Foto", value=p_edit.get('foto_url', ''), help="Use o Envio de Foto acima OU cole um link aqui.", key=f"url_{cod_edit}")
                     
                     cf_edit = c1.number_input("Custo de Fabricação (R$)", value=float(p_edit['custo_fabricacao']), step=0.1, help="Fundição, metal, cravação, confecção bruta da peça.")
                     cb_edit = c2.number_input("Custo de Banho (R$)", value=float(p_edit['custo_banho']), step=0.1)
@@ -183,9 +204,13 @@ elif page == "📦 Produtos e Custos":
                     st.write(f"**Nova Margem de Lucro Projetada:** {margem:.1f}%")
                     
                     if st.form_submit_button("Salvar Edição"):
+                        final_foto_url = foto_edit
+                        if foto_upload_edit is not None:
+                            final_foto_url = get_image_base64(foto_upload_edit)
+                            
                         sucesso = update_produto(cod_edit, {
                             "categoria": cat_edit,
-                            "foto_url": foto_edit,
+                            "foto_url": final_foto_url,
                             "estoque": estoque_edit,
                             "custo_fabricacao": cf_edit,
                             "custo_banho": cb_edit,
@@ -202,7 +227,12 @@ elif page == "📦 Produtos e Custos":
         with st.form("form_novo"):
             codigo = st.text_input("Código do Produto (ID Único)")
             categoria = st.selectbox("Categoria Rigorosa (Obrigatória)", CATEGORIAS)
-            foto_url = st.text_input("URL da Foto do Produto (opcional)", help="Para exibir a foto no catálogo, cole aqui um link válido de imagem da internet.")
+            
+            st.divider()
+            st.write("**Imagem do Produto** (Opcional)")
+            foto_upload = st.file_uploader("Fazer Upload da Foto", type=["png", "jpg", "jpeg", "webp"])
+            foto_url = st.text_input("Ou cole um URL válido da internet caso a foto já esteja online")
+            st.divider()
             
             st.write("Composição de Custos:")
             col1, col2 = st.columns(2)
@@ -220,10 +250,14 @@ elif page == "📦 Produtos e Custos":
                     if existe:
                         st.error("Um produto com este mesmo código já foi cadastrado no sistema.")
                     else:
+                        final_foto_url = foto_url
+                        if foto_upload is not None:
+                            final_foto_url = get_image_base64(foto_upload)
+                            
                         sucesso = insert_produto({
                             "codigo": codigo,
                             "categoria": categoria,
-                            "foto_url": foto_url,
+                            "foto_url": final_foto_url,
                             "custo_fabricacao": custo_fab,
                             "custo_banho": custo_banho,
                             "valor_venda": valor_venda,
