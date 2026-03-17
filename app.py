@@ -50,13 +50,40 @@ def get_vendas():
         return []
 
 def update_produto(codigo, dados):
-    requests.patch(f"{url_base}/produtos?codigo=eq.{codigo}", headers=headers, json=dados, timeout=5)
+    try:
+        response = requests.patch(f"{url_base}/produtos?codigo=eq.{codigo}", headers=headers, json=dados, timeout=5)
+        response.raise_for_status()
+        return True
+    except requests.exceptions.HTTPError as err:
+        st.error(f"Erro ao atualizar: {response.text}")
+        return False
+    except Exception as e:
+        st.error(f"Erro de conexão ao atualizar: {e}")
+        return False
 
 def insert_produto(dados):
-    requests.post(f"{url_base}/produtos", headers=headers, json=dados, timeout=5)
+    try:
+        response = requests.post(f"{url_base}/produtos", headers=headers, json=dados, timeout=5)
+        response.raise_for_status()
+        return True
+    except requests.exceptions.HTTPError as err:
+        st.error(f"Erro do Banco (Cadastro): {response.text}")
+        return False
+    except Exception as e:
+        st.error(f"Erro de conexão (Cadastro): {e}")
+        return False
 
 def insert_venda(dados):
-    requests.post(f"{url_base}/vendas", headers=headers, json=dados, timeout=5)
+    try:
+        response = requests.post(f"{url_base}/vendas", headers=headers, json=dados, timeout=5)
+        response.raise_for_status()
+        return True
+    except requests.exceptions.HTTPError as err:
+        st.error(f"Erro do Banco (Venda): {response.text}")
+        return False
+    except Exception as e:
+        st.error(f"Erro de conexão (Venda): {e}")
+        return False
 
 CATEGORIAS = ["Brinco", "Anel", "Pulseira", "Choker", "Tornozeleira"]
 
@@ -113,14 +140,23 @@ elif page == "📦 Produtos e Custos":
             # Evita divisão por zero
             df['Margem Lucro (%)'] = df.apply(lambda row: ((row['valor_venda'] - row['Custo Total']) / row['Custo Total'] * 100) if row['Custo Total'] > 0 else 0, axis=1)
             
-            df_display = df[['codigo', 'categoria', 'estoque', 'custo_fabricacao', 'custo_banho', 'Custo Total', 'valor_venda', 'Margem Lucro (%)']]
-            st.dataframe(df_display.style.format({
+            if 'foto_url' in df.columns:
+                df_display = df[['codigo', 'foto_url', 'categoria', 'estoque', 'custo_fabricacao', 'custo_banho', 'Custo Total', 'valor_venda', 'Margem Lucro (%)']]
+            else:
+                df_display = df[['codigo', 'categoria', 'estoque', 'custo_fabricacao', 'custo_banho', 'Custo Total', 'valor_venda', 'Margem Lucro (%)']]
+                
+            config_fmt = {
                 'custo_fabricacao': 'R$ {:.2f}',
                 'custo_banho': 'R$ {:.2f}',
                 'Custo Total': 'R$ {:.2f}',
                 'valor_venda': 'R$ {:.2f}',
                 'Margem Lucro (%)': '{:.1f}%'
-            }), use_container_width=True)
+            }
+            
+            if 'foto_url' in df.columns:
+                st.dataframe(df_display.style.format(config_fmt), column_config={"foto_url": st.column_config.ImageColumn("Foto / Imagem")}, use_container_width=True)
+            else:
+                st.dataframe(df_display.style.format(config_fmt), use_container_width=True)
             
             st.divider()
             st.subheader("Editar Valores ou Estoque")
@@ -134,6 +170,8 @@ elif page == "📦 Produtos e Custos":
                     cat_edit = c1.selectbox("Categoria Obrigatória", CATEGORIAS, index=CATEGORIAS.index(p_edit['categoria']) if p_edit['categoria'] in CATEGORIAS else 0)
                     estoque_edit = c2.number_input("Estoque", value=int(p_edit['estoque']), step=1, min_value=0)
                     
+                    foto_edit = st.text_input("URL da Foto Original do Produto (opcional)", value=p_edit.get('foto_url', ''), help="Cole um link direto para a imagem do produto. (Ex: ImgBB, Google Drive, ou URL pura do navegador)")
+                    
                     cf_edit = c1.number_input("Custo de Fabricação (R$)", value=float(p_edit['custo_fabricacao']), step=0.1, help="Fundição, metal, cravação, confecção bruta da peça.")
                     cb_edit = c2.number_input("Custo de Banho (R$)", value=float(p_edit['custo_banho']), step=0.1)
                     
@@ -145,15 +183,17 @@ elif page == "📦 Produtos e Custos":
                     st.write(f"**Nova Margem de Lucro Projetada:** {margem:.1f}%")
                     
                     if st.form_submit_button("Salvar Edição"):
-                        update_produto(cod_edit, {
+                        sucesso = update_produto(cod_edit, {
                             "categoria": cat_edit,
+                            "foto_url": foto_edit,
                             "estoque": estoque_edit,
                             "custo_fabricacao": cf_edit,
                             "custo_banho": cb_edit,
                             "valor_venda": vv_edit
                         })
-                        st.success("Valores atualizados com sucesso!")
-                        st.rerun()
+                        if sucesso:
+                            st.success("Valores atualizados com sucesso!")
+                            st.rerun()
         else:
             st.info("Nenhum produto cadastrado no banco de dados.")
             
@@ -162,6 +202,7 @@ elif page == "📦 Produtos e Custos":
         with st.form("form_novo"):
             codigo = st.text_input("Código do Produto (ID Único)")
             categoria = st.selectbox("Categoria Rigorosa (Obrigatória)", CATEGORIAS)
+            foto_url = st.text_input("URL da Foto do Produto (opcional)", help="Para exibir a foto no catálogo, cole aqui um link válido de imagem da internet.")
             
             st.write("Composição de Custos:")
             col1, col2 = st.columns(2)
@@ -179,16 +220,18 @@ elif page == "📦 Produtos e Custos":
                     if existe:
                         st.error("Um produto com este mesmo código já foi cadastrado no sistema.")
                     else:
-                        insert_produto({
+                        sucesso = insert_produto({
                             "codigo": codigo,
                             "categoria": categoria,
+                            "foto_url": foto_url,
                             "custo_fabricacao": custo_fab,
                             "custo_banho": custo_banho,
                             "valor_venda": valor_venda,
                             "estoque": estoque
                         })
-                        st.success("Produto adicionado com sucesso ao catálogo!")
-                        st.rerun()
+                        if sucesso:
+                            st.success("Produto adicionado com sucesso ao catálogo!")
+                            st.rerun()
 
     with tab3:
         st.subheader("Calculadora de Custo de Banho")
