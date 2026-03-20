@@ -53,7 +53,7 @@ def get_image_base64(uploaded_file):
 def get_produtos():
     url_base, headers = init_headers()
     try:
-        response = requests.get(f"{url_base}/produtos?select=*", headers=headers, timeout=5)
+        response = requests.get(f"{url_base}/produtos?select=*", headers=headers, timeout=15)
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -63,7 +63,7 @@ def get_produtos():
 def get_vendas():
     url_base, headers = init_headers()
     try:
-        response = requests.get(f"{url_base}/vendas?select=*", headers=headers, timeout=5)
+        response = requests.get(f"{url_base}/vendas?select=*", headers=headers, timeout=15)
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -73,7 +73,7 @@ def get_vendas():
 def update_produto(codigo, dados):
     url_base, headers = init_headers()
     try:
-        response = requests.patch(f"{url_base}/produtos?codigo=eq.{codigo}", headers=headers, json=dados, timeout=5)
+        response = requests.patch(f"{url_base}/produtos?codigo=eq.{codigo}", headers=headers, json=dados, timeout=15)
         response.raise_for_status()
         return True
     except requests.exceptions.HTTPError as err:
@@ -83,10 +83,23 @@ def update_produto(codigo, dados):
         st.error(f"Erro de conexão ao atualizar: {e}")
         return False
 
+def delete_produto(codigo):
+    url_base, headers = init_headers()
+    try:
+        response = requests.delete(f"{url_base}/produtos?codigo=eq.{codigo}", headers=headers, timeout=15)
+        response.raise_for_status()
+        return True
+    except requests.exceptions.HTTPError as err:
+        st.error(f"Erro do Banco (Remoção): {response.text}")
+        return False
+    except Exception as e:
+        st.error(f"Erro de conexão (Remoção): {e}")
+        return False
+
 def insert_produto(dados):
     url_base, headers = init_headers()
     try:
-        response = requests.post(f"{url_base}/produtos", headers=headers, json=dados, timeout=5)
+        response = requests.post(f"{url_base}/produtos", headers=headers, json=dados, timeout=15)
         response.raise_for_status()
         return True
     except requests.exceptions.HTTPError as err:
@@ -99,7 +112,7 @@ def insert_produto(dados):
 def insert_venda(dados):
     url_base, headers = init_headers()
     try:
-        response = requests.post(f"{url_base}/vendas", headers=headers, json=dados, timeout=5)
+        response = requests.post(f"{url_base}/vendas", headers=headers, json=dados, timeout=15)
         response.raise_for_status()
         return True
     except requests.exceptions.HTTPError as err:
@@ -112,7 +125,7 @@ def insert_venda(dados):
 def update_venda(id_venda, dados):
     url_base, headers = init_headers()
     try:
-        response = requests.patch(f"{url_base}/vendas?id=eq.{id_venda}", headers=headers, json=dados, timeout=5)
+        response = requests.patch(f"{url_base}/vendas?id=eq.{id_venda}", headers=headers, json=dados, timeout=15)
         response.raise_for_status()
         return True
     except requests.exceptions.HTTPError as err:
@@ -173,36 +186,49 @@ elif page == "📦 Produtos e Custos":
         produtos = get_produtos()
         if produtos:
             df = pd.DataFrame(produtos)
-            df['Custo Total'] = df['custo_fabricacao'] + df['custo_banho']
-            # Evita divisão por zero
-            df['Margem Lucro (%)'] = df.apply(lambda row: ((row['valor_venda'] - row['Custo Total']) / row['Custo Total'] * 100) if row['Custo Total'] > 0 else 0, axis=1)
             
-            if 'foto_url' in df.columns:
-                df_display = df[['codigo', 'foto_url', 'categoria', 'estoque', 'custo_fabricacao', 'custo_banho', 'Custo Total', 'valor_venda', 'Margem Lucro (%)']]
-            else:
-                df_display = df[['codigo', 'categoria', 'estoque', 'custo_fabricacao', 'custo_banho', 'Custo Total', 'valor_venda', 'Margem Lucro (%)']]
+            # Filtro por Categoria
+            filtro_cat = st.multiselect("Filtrar por Categoria", CATEGORIAS, help="Deixe vazio para mostrar todas as categorias.")
+            df_filtrado = df.copy()
+            if filtro_cat:
+                df_filtrado = df_filtrado[df_filtrado['categoria'].isin(filtro_cat)]
                 
-            config_fmt = {
-                'custo_fabricacao': 'R$ {:.2f}',
-                'custo_banho': 'R$ {:.2f}',
-                'Custo Total': 'R$ {:.2f}',
-                'valor_venda': 'R$ {:.2f}',
-                'Margem Lucro (%)': '{:.1f}%'
-            }
-            
-            if 'foto_url' in df.columns:
-                st.dataframe(df_display.style.format(config_fmt), column_config={"foto_url": st.column_config.ImageColumn("Foto / Imagem")}, use_container_width=True)
+            if df_filtrado.empty:
+                st.info("Nenhum produto encontrado para o filtro selecionado.")
             else:
-                st.dataframe(df_display.style.format(config_fmt), use_container_width=True)
+                df_filtrado['Custo Total'] = df_filtrado['custo_fabricacao'] + df_filtrado['custo_banho']
+                # Evita divisão por zero
+                df_filtrado['Margem Lucro (%)'] = df_filtrado.apply(lambda row: ((row['valor_venda'] - row['Custo Total']) / row['Custo Total'] * 100) if row['Custo Total'] > 0 else 0, axis=1)
+                
+                if 'foto_url' in df_filtrado.columns:
+                    df_display = df_filtrado[['codigo', 'foto_url', 'categoria', 'estoque', 'custo_fabricacao', 'custo_banho', 'Custo Total', 'valor_venda', 'Margem Lucro (%)']]
+                else:
+                    df_display = df_filtrado[['codigo', 'categoria', 'estoque', 'custo_fabricacao', 'custo_banho', 'Custo Total', 'valor_venda', 'Margem Lucro (%)']]
+                    
+                config_fmt = {
+                    'custo_fabricacao': 'R$ {:.2f}',
+                    'custo_banho': 'R$ {:.2f}',
+                    'Custo Total': 'R$ {:.2f}',
+                    'valor_venda': 'R$ {:.2f}',
+                    'Margem Lucro (%)': '{:.1f}%'
+                }
+                
+                if 'foto_url' in df_filtrado.columns:
+                    st.dataframe(df_display.style.format(config_fmt), column_config={"foto_url": st.column_config.ImageColumn("Foto / Imagem")}, use_container_width=True)
+                else:
+                    st.dataframe(df_display.style.format(config_fmt), use_container_width=True)
             
             st.divider()
-            st.subheader("Editar Valores ou Estoque")
-            st.write("Atualize custos dinamicamente. A margem de lucro será recalculada.")
+            st.subheader("Opções de Produto: Editar, Alterar Código ou Remover")
+            st.write("Atualize propriedades do produto. A margem de lucro será recalculada.")
             
             cod_edit = st.selectbox("Selecione pela Referência/Código:", df['codigo'].tolist())
             if cod_edit:
                 p_edit = next(p for p in produtos if p['codigo'] == cod_edit)
+                
                 with st.form("form_edit"):
+                    st.write("**Edição de Dados**")
+                    novo_codigo_edit = st.text_input("Código do Produto (Permite alterar)", value=p_edit['codigo'])
                     c1, c2 = st.columns(2)
                     cat_edit = c1.selectbox("Categoria Obrigatória", CATEGORIAS, index=CATEGORIAS.index(p_edit['categoria']) if p_edit['categoria'] in CATEGORIAS else 0)
                     estoque_edit = c2.number_input("Estoque", value=int(p_edit['estoque']), step=1, min_value=0)
@@ -221,21 +247,40 @@ elif page == "📦 Produtos e Custos":
                     margem = ((vv_edit - custo_total_edit) / custo_total_edit * 100) if custo_total_edit > 0 else 0
                     st.write(f"**Nova Margem de Lucro Projetada:** {margem:.1f}%")
                     
-                    if st.form_submit_button("Salvar Edição"):
-                        final_foto_url = foto_edit
-                        if foto_upload_edit is not None:
-                            final_foto_url = get_image_base64(foto_upload_edit)
-                            
-                        sucesso = update_produto(cod_edit, {
-                            "categoria": cat_edit,
-                            "foto_url": final_foto_url,
-                            "estoque": estoque_edit,
-                            "custo_fabricacao": cf_edit,
-                            "custo_banho": cb_edit,
-                            "valor_venda": vv_edit
-                        })
-                        if sucesso:
-                            st.success("Valores atualizados com sucesso!")
+                    if st.form_submit_button("Salvar Edição", type="primary"):
+                        if not novo_codigo_edit:
+                            st.error("O código não pode ficar vazio.")
+                        else:
+                            url_base, headers = init_headers()
+                            if novo_codigo_edit != cod_edit:
+                                existe = requests.get(f"{url_base}/produtos?codigo=eq.{novo_codigo_edit}&select=codigo", headers=headers, timeout=15).json()
+                                if existe:
+                                    st.error("O novo código informado já existe em outro produto!")
+                                    st.stop()
+                                    
+                            final_foto_url = foto_edit
+                            if foto_upload_edit is not None:
+                                final_foto_url = get_image_base64(foto_upload_edit)
+                                
+                            sucesso = update_produto(cod_edit, {
+                                "codigo": novo_codigo_edit,
+                                "categoria": cat_edit,
+                                "foto_url": final_foto_url,
+                                "estoque": estoque_edit,
+                                "custo_fabricacao": cf_edit,
+                                "custo_banho": cb_edit,
+                                "valor_venda": vv_edit
+                            })
+                            if sucesso:
+                                st.success("Produto atualizado com sucesso!")
+                                st.rerun()
+                                
+                st.write("**Remover Produto**")
+                with st.form("form_delete"):
+                    st.warning(f"Tem certeza que deseja remover o produto **{cod_edit}** do catálogo? Esta ação não pode ser desfeita.")
+                    if st.form_submit_button("❌ Remover Produto"):
+                        if delete_produto(cod_edit):
+                            st.success(f"Produto {cod_edit} removido com sucesso!")
                             st.rerun()
         else:
             st.info("Nenhum produto cadastrado no banco de dados.")
@@ -265,7 +310,7 @@ elif page == "📦 Produtos e Custos":
                     st.error("Insira um código identificador válido do produto.")
                 else:
                     url_base, headers = init_headers()
-                    existe = requests.get(f"{url_base}/produtos?codigo=eq.{codigo}&select=codigo", headers=headers).json()
+                    existe = requests.get(f"{url_base}/produtos?codigo=eq.{codigo}&select=codigo", headers=headers, timeout=15).json()
                     if existe:
                         st.error("Um produto com este mesmo código já foi cadastrado no sistema.")
                     else:
