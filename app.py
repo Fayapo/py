@@ -83,17 +83,22 @@ def update_produto(codigo, dados):
         st.error(f"Erro de conexão ao atualizar: {e}")
         return False
 
-def delete_produto(codigo):
+def delete_produto(codigo, silencioso=False):
     url_base, headers = init_headers()
     try:
         response = requests.delete(f"{url_base}/produtos?codigo=eq.{codigo}", headers=headers, timeout=15)
         response.raise_for_status()
         return True
     except requests.exceptions.HTTPError as err:
-        st.error(f"Erro do Banco (Remoção): {response.text}")
+        if not silencioso:
+            if "23503" in response.text:
+                st.error("⚠️ Não é possível remover este produto da base de dados pois ele já possui histórico de vendas. Sugerimos apenas ZERAR o estoque dele para manter seu histórico financeiro e registros intactos.")
+            else:
+                st.error(f"Erro do Banco (Remoção): {response.text}")
         return False
     except Exception as e:
-        st.error(f"Erro de conexão (Remoção): {e}")
+        if not silencioso:
+            st.error(f"Erro de conexão (Remoção): {e}")
         return False
 
 def insert_produto(dados):
@@ -252,28 +257,47 @@ elif page == "📦 Produtos e Custos":
                             st.error("O código não pode ficar vazio.")
                         else:
                             url_base, headers = init_headers()
+                            final_foto_url = foto_edit
+                            if foto_upload_edit is not None:
+                                final_foto_url = get_image_base64(foto_upload_edit)
+                                
                             if novo_codigo_edit != cod_edit:
                                 existe = requests.get(f"{url_base}/produtos?codigo=eq.{novo_codigo_edit}&select=codigo", headers=headers, timeout=15).json()
                                 if existe:
                                     st.error("O novo código informado já existe em outro produto!")
                                     st.stop()
                                     
-                            final_foto_url = foto_edit
-                            if foto_upload_edit is not None:
-                                final_foto_url = get_image_base64(foto_upload_edit)
-                                
-                            sucesso = update_produto(cod_edit, {
-                                "codigo": novo_codigo_edit,
-                                "categoria": cat_edit,
-                                "foto_url": final_foto_url,
-                                "estoque": estoque_edit,
-                                "custo_fabricacao": cf_edit,
-                                "custo_banho": cb_edit,
-                                "valor_venda": vv_edit
-                            })
-                            if sucesso:
-                                st.success("Produto atualizado com sucesso!")
-                                st.rerun()
+                                # Workaround para Foreign Key (RESTRICT) no Supabase ao atualizar chave estrangeira
+                                # 1. Criar novo produto clone com o novo código
+                                sucesso_novo = insert_produto({
+                                    "codigo": novo_codigo_edit,
+                                    "categoria": cat_edit,
+                                    "foto_url": final_foto_url,
+                                    "estoque": estoque_edit,
+                                    "custo_fabricacao": cf_edit,
+                                    "custo_banho": cb_edit,
+                                    "valor_venda": vv_edit
+                                })
+                                if sucesso_novo:
+                                    # 2. Atualizar as referências de vendas para o novo código
+                                    requests.patch(f"{url_base}/vendas?codigo_produto=eq.{cod_edit}", headers=headers, json={"codigo_produto": novo_codigo_edit}, timeout=15)
+                                    # 3. Remover o produto antigo
+                                    delete_produto(cod_edit, silencioso=True)
+                                    
+                                    st.success("O código do produto foi alterado e suas vendas foram migradas com sucesso!")
+                                    st.rerun()
+                            else:
+                                sucesso = update_produto(cod_edit, {
+                                    "categoria": cat_edit,
+                                    "foto_url": final_foto_url,
+                                    "estoque": estoque_edit,
+                                    "custo_fabricacao": cf_edit,
+                                    "custo_banho": cb_edit,
+                                    "valor_venda": vv_edit
+                                })
+                                if sucesso:
+                                    st.success("Produto atualizado com sucesso!")
+                                    st.rerun()
                                 
                 st.write("**Remover Produto**")
                 with st.form("form_delete"):
