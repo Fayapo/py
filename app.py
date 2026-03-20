@@ -140,6 +140,19 @@ def update_venda(id_venda, dados):
         st.error(f"Erro de conexão ao atualizar: {e}")
         return False
 
+def delete_venda(id_venda):
+    url_base, headers = init_headers()
+    try:
+        response = requests.delete(f"{url_base}/vendas?id=eq.{id_venda}", headers=headers, timeout=15)
+        response.raise_for_status()
+        return True
+    except requests.exceptions.HTTPError as err:
+        st.error(f"Erro do Banco (Remoção de Venda): {response.text}")
+        return False
+    except Exception as e:
+        st.error(f"Erro de conexão (Remoção de Venda): {e}")
+        return False
+
 CATEGORIAS = ["Brinco", "Anel", "Pulseira", "Choker", "Tornozeleira"]
 
 st.sidebar.title("🌹 Rosemie - Painel")
@@ -446,13 +459,73 @@ elif page == "🛒 Registro de Vendas":
             # Convert to Pandas Datetime standard.
             df_v['criado_em'] = pd.to_datetime(df_v['created_at']).dt.strftime('%d/%m/%Y %H:%M')
             
-            df_v_display = df_v[['criado_em', 'codigo_produto', 'quantidade', 'lucro_real_total']].rename(columns={
+            df_v_display = df_v[['id', 'criado_em', 'codigo_produto', 'quantidade', 'lucro_real_total']].rename(columns={
+                'id': 'ID da Venda',
                 'criado_em': 'Data da Venda (UTC)',
                 'codigo_produto': 'Cód. Venda/Produto',
                 'quantidade': 'Qtd. de Peças',
                 'lucro_real_total': 'Lucro Real Líquido (R$)'
             })
             st.dataframe(df_v_display.style.format({'Lucro Real Líquido (R$)': 'R$ {:.2f}'}), use_container_width=True)
+            
+            st.divider()
+            st.subheader("Resumo de Vendas Diárias")
+            df_v['data_resumo'] = pd.to_datetime(df_v['created_at']).dt.strftime('%d/%m/%Y')
+            
+            df_v['receita_venda'] = df_v['valor_venda_unitario'].fillna(0.0).astype(float) * df_v['quantidade'].fillna(0).astype(int)
+            df_v['lucro_real_total'] = df_v['lucro_real_total'].fillna(0.0).astype(float)
+            
+            df_diario = df_v.groupby('data_resumo').agg(
+                Qtd_Vendas=('id', 'count'),
+                Pecas_Vendidas=('quantidade', 'sum'),
+                Receita_Total=('receita_venda', 'sum'),
+                Lucro_Total=('lucro_real_total', 'sum')
+            ).reset_index()
+            
+            # Ordenar por data (da mais recente para a mais antiga)
+            df_diario['Data_Sort'] = pd.to_datetime(df_diario['data_resumo'], format='%d/%m/%Y')
+            df_diario = df_diario.sort_values(by='Data_Sort', ascending=False).drop(columns=['Data_Sort'])
+            
+            df_diario = df_diario.rename(columns={
+                'data_resumo': 'Data',
+                'Qtd_Vendas': 'Nº de Vendas',
+                'Pecas_Vendidas': 'Peças Vendidas',
+                'Receita_Total': 'Receita Total (R$)',
+                'Lucro_Total': 'Lucro Total (R$)'
+            })
+            
+            st.dataframe(df_diario.style.format({
+                'Receita Total (R$)': 'R$ {:.2f}',
+                'Lucro Total (R$)': 'R$ {:.2f}'
+            }), use_container_width=True)
+            
+            st.divider()
+            st.subheader("Excluir Venda")
+            st.write("Atenção: A exclusão da venda é permanente. Você pode restaurar o estoque para que não haja perda na contagem dos produtos.")
+            
+            opcoes_venda = df_v.apply(lambda row: f"ID: {row['id']} | {row['data_resumo']} | Cód: {row['codigo_produto']} | Qtd: {row['quantidade']}", axis=1).tolist()
+            mapa_vendas = dict(zip(opcoes_venda, df_v['id'].tolist()))
+            
+            venda_selecionada = st.selectbox("Selecione a Venda para Excluir", [""] + opcoes_venda)
+            if venda_selecionada:
+                id_venda_excluir = mapa_vendas[venda_selecionada]
+                venda_info = df_v[df_v['id'] == id_venda_excluir].iloc[0]
+                
+                restaurar_estoque = st.checkbox("Restaurar quantidade da venda de volta ao estoque do produto?", value=True)
+                
+                with st.form("form_delete_venda"):
+                    if st.form_submit_button("❌ Confirmar Exclusão da Venda"):
+                        if restaurar_estoque:
+                            prod_atual = next((p for p in produtos if p['codigo'] == venda_info['codigo_produto']), None)
+                            if prod_atual:
+                                novo_estoque = int(prod_atual['estoque']) + int(venda_info['quantidade'])
+                                update_produto(venda_info['codigo_produto'], {"estoque": novo_estoque})
+                            else:
+                                st.warning(f"O produto {venda_info['codigo_produto']} não foi encontrado. O estoque deve ser ajustado manualmente na aba de Produtos.")
+                        
+                        if delete_venda(id_venda_excluir):
+                            st.success(f"Venda removida com sucesso!")
+                            st.rerun()
 
 elif page == "👥 Área de Clientes":
     st.title("👥 Área de Clientes e Garantia")
